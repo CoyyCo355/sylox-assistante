@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chambre – Sylox</title>
+  <style>
+    body {
+      background: #111;
+      color: #eee;
+      font-family: sans-serif;
+      text-align: center;
+      padding: 2rem;
+    }
+    #startBtn {
+      padding: 12px 24px;
+      font-size: 1.1rem;
+      border: none;
+      border-radius: 8px;
+      background: #5c3dff;
+      color: #fff;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 1rem;
+      font-size: 1.2rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Chambre (Sylox)</h1>
+  <p id="status">Clique sur « Démarrer » puis parle</p>
+  <button id="startBtn">Démarrer</button>
+
+<script>
+const rules = [
+  { pattern: /chambre.*?((c|\u00e7)a|sa)\s+va|((c|\u00e7)a|sa)\s+va.*?chambre/i, response: "oui, je vais bien" },
+  { pattern: /\btu\s+vas?\s+bien\b/i, response: "oui, je vais bien" },
+  { pattern: /\bbonjour\b/i, response: "salut Florent, tu vas bien ?" },
+  { pattern: /\banomalie\b/i, response: "je ne trouve aucune anomalie dans mon système" },
+  { pattern: /(qui\s+es[-\s]*tu|tu\s+es\s+qui|t[\s’']?es\s+qui|t[\s’']?ki)/i, response: "je suis la chambre de Florent" },
+  { pattern: /(ou\s+es\s+tu|où\s+es\s+tu|tu\s+es\s+où|t[’' ]?es\s+où|t[’' ]?es\s+ou|tu\s+es\s+ou|ou\s+te\s+trouves\s+tu|où\s+te\s+trouves\s+tu|d[’' ]?où\s+viens\s+tu|tu\s+viens\s+d[’' ]?où|d[’' ]?où\s+tu\s+viens|ou\s+est\s+ta\s+voix|ou\s+viens\s+le\s+son|d[’' ]?où\s+tu\s+viens|d[’' ]?où\s+tu\s+es|t[’' ]?es\s+où)/i, response: "Florent m’a intégré une voix, je suis désormais sa chambre mais avec une voix" },
+  { pattern: /\bmerci\b/i, response: "de rien" },
+  { pattern: /\bcréateur\b/i, response: "mon créateur est Florent" },
+  { pattern: /florent.*\?|\?.*florent/i, response: "Florent est mon créateur donc je n'ai pas le droit de fournir d'information sur lui" },
+  { pattern: /\bquestions?\b/i, response: "Je suis là pour répondre à vos questions, si je ne réponds pas, reposez la question, si je ne réponds vraiment pas c'est que je n'ai pas la réponse" },
+  { pattern: /\bchambre\b/i, response: "oui, je suis là" }
+];
+
+const ignorePattern = /^((c|\u00e7)a|sa)\s+va[\s?!.]*$/i;
+const startRec = /\b(commence|d[\u00e9e]marre|enregistre)(?!.*dernier)[\s\w']*enregistrement\b/i;
+const stopRec = /\b(arr[\u00eate|e]te|stoppe?|stop)[\s\w']*enregistrement\b/i;
+const playLast = /\b(lance|joue|lis)[\s\w']*(dernier|dernier\s+enregistrement)\b/i;
+const stopAll = /\barr[\u00ea|e]te[-\s]*(toi|tout)\b/i;
+
+function normalize(text) {
+  return text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+let voice = null;
+function pickVoice() {
+  const v = speechSynthesis.getVoices();
+  voice = v.find(x => /fr/i.test(x.lang) && /(female|femme|google français)/i.test(x.name)) || v.find(x => /fr/i.test(x.lang)) || v[0];
+}
+speechSynthesis.onvoiceschanged = pickVoice;
+pickVoice();
+
+function speak(text) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.voice = voice;
+  u.lang = "fr-FR";
+  speechSynthesis.speak(u);
+}
+
+let recorder, audioChunks = [], recording = false;
+function startRecording() {
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = e => audioChunks.push(e.data);
+    recorder.onstop = sendAudio;
+    recorder.start();
+    recording = true;
+    setStatus("🎙️ Enregistrement en cours...");
+  });
+}
+
+function stopRecording() {
+  if (recorder && recording) {
+    recorder.stop();
+    recording = false;
+    setStatus("⏳ Envoi en cours...");
+  }
+}
+
+function sendAudio() {
+  const blob = new Blob(audioChunks, { type: "audio/webm" });
+  audioChunks = [];
+  const formData = new FormData();
+  formData.append("audio", blob);
+  fetch("upload.php", {
+    method: "POST",
+    body: formData
+  }).then(r => r.text()).then(t => setStatus("✅ Audio enregistré.")).catch(e => {
+    console.error(e);
+    setStatus("❌ Erreur pendant l'envoi");
+  });
+}
+
+function playLastRecording() {
+  const audio = new Audio("Recordings/latest.webm");
+  audio.play();
+  setStatus("▶ Lecture du dernier enregistrement...");
+}
+
+function stopEverything() {
+  speechSynthesis.cancel();
+  document.querySelectorAll("audio").forEach(a => a.pause());
+  setStatus("⛔ Arrêt total.");
+}
+
+function setStatus(msg) {
+  document.getElementById("status").textContent = msg;
+}
+
+const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+rec.continuous = true;
+rec.lang = "fr-FR";
+
+rec.onresult = e => {
+  const raw = e.results[e.results.length - 1][0].transcript.trim();
+  const txtRaw = raw.toLowerCase();
+  const txtClean = normalize(txtRaw);
+  console.log("🎧", raw);
+
+  if (speechSynthesis.speaking) speechSynthesis.cancel();
+
+  if (stopAll.test(txtRaw) || stopAll.test(txtClean)) {
+    stopEverything();
+    return;
+  }
+
+  if (playLast.test(txtRaw) || playLast.test(txtClean)) {
+    playLastRecording();
+    return;
+  }
+
+  if (startRec.test(txtRaw) || startRec.test(txtClean)) {
+    if (!recording) startRecording();
+    return;
+  }
+
+  if (stopRec.test(txtRaw) || stopRec.test(txtClean)) {
+    if (recording) stopRecording();
+    return;
+  }
+
+  if (ignorePattern.test(txtRaw) || ignorePattern.test(txtClean)) return;
+
+  for (const r of rules) {
+    if (r.pattern.test(txtRaw) || r.pattern.test(txtClean)) {
+      speak(r.response);
+      return;
+    }
+  }
+};
+
+rec.onend = () => setTimeout(() => rec.start(), 300);
+
+window.onload = () => {
+  document.getElementById("startBtn").onclick = async () => {
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      rec.start();
+      document.getElementById("startBtn").style.display = "none";
+      setStatus("🎤 Prête. Parle normalement.");
+    } catch {
+      alert("Micro refusé.");
+    }
+  };
+};
+</script>
+</body>
+</html>
