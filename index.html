@@ -48,7 +48,7 @@ const rules = [
 
 const ignorePattern = /^((c|\u00e7)a|sa)\s+va[\s?!.]*$/i;
 const startRec = /\b(commence|d[\u00e9e]marre|enregistre)(?!.*dernier)[\s\w']*enregistrement\b/i;
-const stopRec = /\b(arr[\u00eate|e]te|stoppe?|stop)[\s\w']*enregistrement\b/i;
+const stopRec = /\b(arr[\u00ea|e]te|stoppe?|stop)[\s\w']*enregistrement\b/i;
 const playLast = /\b(lance|joue|lis)[\s\w']*(dernier|dernier\s+enregistrement)\b/i;
 const stopAll = /\barr[\u00ea|e]te[-\s]*(toi|tout)\b/i;
 
@@ -59,7 +59,7 @@ function normalize(text) {
 let voice = null;
 function pickVoice() {
   const v = speechSynthesis.getVoices();
-  voice = v.find(x => /fr/i.test(x.lang) && /(female|femme|google français)/i.test(x.name)) || v.find(x => /fr/i.test(x.lang)) || v[0];
+  voice = v.find(x => /fr/i.test(x.lang) && /(female|femme|google français|google fr)/i.test(x.name)) || v.find(x => /fr/i.test(x.lang)) || v[0];
 }
 speechSynthesis.onvoiceschanged = pickVoice;
 pickVoice();
@@ -69,6 +69,7 @@ function speak(text) {
   const u = new SpeechSynthesisUtterance(text);
   u.voice = voice;
   u.lang = "fr-FR";
+  u.volume = 1; // volume max pour iOS
   speechSynthesis.speak(u);
 }
 
@@ -169,6 +170,11 @@ rec.onend = () => setTimeout(() => rec.start(), 300);
 window.onload = () => {
   document.getElementById("startBtn").onclick = async () => {
     try {
+      // 🔓 Hack vocal iOS pour activer le son
+      const u = new SpeechSynthesisUtterance(".");
+      u.volume = 0;
+      speechSynthesis.speak(u);
+
       await navigator.mediaDevices.getUserMedia({ audio: true });
       rec.start();
       document.getElementById("startBtn").style.display = "none";
